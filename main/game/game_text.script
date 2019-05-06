@@ -1,0 +1,22 @@
+function init(self)
+	self.a = 2
+	
+	local p = go.get_position()
+	p.z = self.a
+	go.set_position(p)
+	p.y = p.y + 32
+	go.animate(".", "position.y", go.PLAYBACK_ONCE_FORWARD, p.y, go.EASING_INCUBIC, 2, 0, function()
+		go.delete()
+	end)
+
+	go.animate("#label", "color", go.PLAYBACK_ONCE_FORWARD, vmath.vector4(0), go.EASING_LINEAR, 2)
+	go.animate("#label", "shadow", go.PLAYBACK_ONCE_FORWARD, vmath.vector4(0), go.EASING_LINEAR, 2)
+	
+end
+
+function update(self, dt)
+	self.a = self.a + dt*20
+	local p = go.get_position()
+	p.z = self.a
+	go.set_position(p)
+end

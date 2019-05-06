@@ -1,0 +1,5 @@
+script: "/main/game.render_script"
+materials {
+  name: "copy"
+  material: "/assets/materials/copy.material"
+}

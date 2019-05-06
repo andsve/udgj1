@@ -1,0 +1,154 @@
+image: "/assets/images/boss_test1.png"
+tile_width: 16
+tile_height: 16
+tile_margin: 0
+tile_spacing: 0
+collision: ""
+material_tag: "tile"
+collision_groups: "default"
+animations {
+  id: "0000"
+  start_tile: 33
+  end_tile: 33
+  playback: PLAYBACK_ONCE_FORWARD
+  fps: 30
+  flip_horizontal: 0
+  flip_vertical: 0
+}
+animations {
+  id: "arrow"
+  start_tile: 32
+  end_tile: 32
+  playback: PLAYBACK_ONCE_FORWARD
+  fps: 30
+  flip_horizontal: 0
+  flip_vertical: 0
+}
+animations {
+  id: "danger_down"
+  start_tile: 393
+  end_tile: 400
+  playback: PLAYBACK_LOOP_FORWARD
+  fps: 20
+  flip_horizontal: 0
+  flip_vertical: 1
+}
+animations {
+  id: "danger_downleft"
+  start_tile: 404
+  end_tile: 404
+  playback: PLAYBACK_ONCE_FORWARD
+  fps: 20
+  flip_horizontal: 0
+  flip_vertical: 0
+}
+animations {
+  id: "danger_downright"
+  start_tile: 403
+  end_tile: 403
+  playback: PLAYBACK_ONCE_FORWARD
+  fps: 20
+  flip_horizontal: 0
+  flip_vertical: 0
+}
+animations {
+  id: "danger_left"
+  start_tile: 385
+  end_tile: 392
+  playback: PLAYBACK_LOOP_FORWARD
+  fps: 20
+  flip_horizontal: 0
+  flip_vertical: 0
+}
+animations {
+  id: "danger_right"
+  start_tile: 385
+  end_tile: 392
+  playback: PLAYBACK_LOOP_FORWARD
+  fps: 20
+  flip_horizontal: 1
+  flip_vertical: 0
+}
+animations {
+  id: "danger_up"
+  start_tile: 393
+  end_tile: 400
+  playback: PLAYBACK_LOOP_FORWARD
+  fps: 20
+  flip_horizontal: 0
+  flip_vertical: 0
+}
+animations {
+  id: "danger_upleft"
+  start_tile: 401
+  end_tile: 401
+  playback: PLAYBACK_ONCE_FORWARD
+  fps: 20
+  flip_horizontal: 0
+  flip_vertical: 0
+}
+animations {
+  id: "danger_upright"
+  start_tile: 402
+  end_tile: 402
+  playback: PLAYBACK_ONCE_FORWARD
+  fps: 20
+  flip_horizontal: 0
+  flip_vertical: 0
+}
+animations {
+  id: "menu_select"
+  start_tile: 65
+  end_tile: 93
+  playback: PLAYBACK_LOOP_FORWARD
+  fps: 30
+  flip_horizontal: 0
+  flip_vertical: 0
+}
+animations {
+  id: "menu_select_inv"
+  start_tile: 65
+  end_tile: 93
+  playback: PLAYBACK_LOOP_BACKWARD
+  fps: 30
+  flip_horizontal: 0
+  flip_vertical: 0
+}
+animations {
+  id: "skull"
+  start_tile: 611
+  end_tile: 611
+  playback: PLAYBACK_ONCE_FORWARD
+  fps: 30
+  flip_horizontal: 0
+  flip_vertical: 0
+}
+animations {
+  id: "snake_shade"
+  start_tile: 993
+  end_tile: 993
+  playback: PLAYBACK_ONCE_FORWARD
+  fps: 30
+  flip_horizontal: 0
+  flip_vertical: 0
+}
+animations {
+  id: "spawner"
+  start_tile: 65
+  end_tile: 93
+  playback: PLAYBACK_LOOP_FORWARD
+  fps: 60
+  flip_horizontal: 0
+  flip_vertical: 0
+}
+animations {
+  id: "stars"
+  start_tile: 97
+  end_tile: 100
+  playback: PLAYBACK_LOOP_FORWARD
+  fps: 10
+  flip_horizontal: 0
+  flip_vertical: 0
+}
+extrude_borders: 2
+inner_padding: 0

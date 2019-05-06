@@ -1,0 +1,35 @@
+[bootstrap]
+main_collection = /main/controller.collectionc
+render = /main/game.renderc
+
+[script]
+shared_state = 1
+
+[display]
+width = 1024
+height = 1024
+
+[project]
+title = BlockOperatedSnakeSystem
+dependencies = https://github.com/indiesoftby/defold-hyper-trails/archive/master.zip
+
+[android]
+package = se.svenandersson.boss
+
+[osx]
+bundle_identifier = se.svenandersson.boss
+
+[ios]
+bundle_identifier = se.svenandersson.boss
+
+[graphics]
+default_texture_min_filter = nearest
+default_texture_mag_filter = nearest
+
+[sprite]
+subpixels = 0
+max_count = 1024
+
+[html5]
+htmlfile = /engine_template.html
+

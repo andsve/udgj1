@@ -1,0 +1,385 @@
+go.property("player_color", vmath.vector4())
+go.property("start_pos", vmath.vector3())
+go.property("player_id", hash(""))
+-- vmath.vector4(142/255, 22/255, 102/255, 1.0)
+
+local ACTIONS = require("main.shared.actions")
+local STATE = require("main.shared.state")
+
+local function check_death(self, tail, bx1, bx2, by1, by2)
+	if not tail then
+		return false
+	end
+	if tail.x < bx1 then
+		return true
+	elseif tail.x > bx2 then
+		return true
+	elseif tail.y < by1 then
+		return true
+	elseif tail.y > by2 then
+		return true
+	end
+
+	if tail.next_tail then
+		return check_death(self, tail.next_tail, bx1, bx2, by1, by2)
+	end
+	
+	return false
+end
+
+local function make_tail_dead(self, tail, turn_into)
+
+	-- update map
+	self.state.map[tail.x][tail.y].d = turn_into --STATE.BLOCKS.WALL
+	tilemap.set_tile("gamemap#map", "layer1", tail.x, tail.y, 129)
+	
+	-- delete tail go
+	if tail.go then
+		go.delete(tail.go)
+		tail.go = nil
+	end
+
+	-- recurse to next tail part
+	if tail.next_tail then
+		make_tail_dead(self, tail.next_tail, turn_into)
+	end
+
+	-- update previous tail that we don't exist anymore
+	if tail.parent_tail then
+		tail.parent_tail.next_tail = nil
+	end
+
+	-- update head that the last tail is now the previous one
+	tail.head.end_tail = tail.parent_tail
+
+	-- if this was the only tail, update start tail of head as well
+	if tail.head.tail == tail then
+		tail.head.tail = nil
+	end
+	
+	self.state.map[tail.x][tail.y].tail = nil
+	--STATE.connect(self, "gamemap#map", STATE.BLOCKS.EATABLE, tail.x, tail.y)
+end
+
+local function notify_tail_owner_of_death(self, eaten_tail)
+	local head = eaten_tail.head
+
+	if eaten_tail.parent_tail then
+		--eaten_tail.next_tail = nil
+	end
+	head.tail = eaten_tail.parent_tail
+end
+
+local function new_tail(self, head, old_tail)
+	-- get position of old tail
+	local spawn_pos = go.get_world_position()
+	if old_tail then
+		spawn_pos = go.get_world_position(old_tail.go)
+	end
+	local x = self.head.x
+	local y = self.head.y
+	if old_tail then
+		x = old_tail.x
+		y = old_tail.y
+	end
+	local tail_go = factory.create("#tail_factory", spawn_pos)
+	local tail_sprite = msg.url(tail_go)
+	tail_sprite.fragment = "sprite"
+	sprite.set_constant(tail_sprite, "tint", go.get("#", "player_color"))
+	
+	local new_tail = {head = head, go = tail_go, parent_tail = old_tail, next_tail = nil, x = x, y = y}
+	if old_tail then
+		old_tail.next_tail = new_tail
+	end
+	return new_tail
+end
+
+local function spawn_tail(self)
+	self.head.end_tail = new_tail(self, self.head, self.head.end_tail)
+	if not self.head.tail then
+		self.head.tail = self.head.end_tail
+	end
+end
+
+-- pulls the tail, depth first
+-- for the last tail entry it will generate a "fake tail" to
+-- cover up the "merge" between the second to last and last entry.
+local function pull_tail(self, prev_x, prev_y, tail)
+	if not tail then
+		return
+	end
+
+	local p = go.get_world_position(tail.go)
+	
+	local x = tail.x
+	local y = tail.y
+	self.state.map[x][y].d = nil
+	self.state.map[x][y].tail = nil
+
+	local next_p = vmath.vector3(prev_x*self.block_size, prev_y*self.block_size, 0)
+	if tail.next_tail then
+		--go.set_position(next_p, tail.go)
+		-- check if distance is large, then animate!
+		if vmath.length(next_p - p) > 16 then
+			go.animate(tail.go, "position", go.PLAYBACK_ONCE_FORWARD, next_p, go.EASING_LINEAR, self.move_speed)
+		else
+			go.set_position(next_p, tail.go)
+		end
+	else
+		--local fake_tail = factory.create("#tail_factory", next_p)
+		msg.post(self.fake_tail, "enable")
+		go.set_position(next_p, self.fake_tail)
+		go.animate(tail.go, "position", go.PLAYBACK_ONCE_FORWARD, next_p, go.EASING_LINEAR, self.move_speed, 0, function()
+			--go.delete(fake_tail)
+			msg.post(self.fake_tail, "disable")
+		end)
+		local tail_sprite = msg.url(self.fake_tail)
+		tail_sprite.fragment = "sprite"
+		sprite.set_constant(tail_sprite, "tint", go.get("#", "player_color"))
+	end
+
+	tail.x = prev_x
+	tail.y = prev_y
+	self.state.map[prev_x][prev_y].d = STATE.BLOCKS.TAIL
+	self.state.map[prev_x][prev_y].tail = tail
+
+	pull_tail(self, x, y, tail.next_tail)
+end
+
+local function can_move(self, x, y)
+	--if self.state.map[x][y].d == nil and self.can_move then
+	if not self.can_move then
+		--print("can move, next tile [" .. tostring(x) .. "," .. tostring(y) .. "] has: " .. tostring(self.state.map[x][y].d) .. " (can move: " .. tostring(self.can_move) .. ")")
+		return false
+	end
+
+	if self.state.map[x][y].d == STATE.BLOCKS.WALL then --or 
+		--self.state.map[x][y].d == STATE.BLOCKS.TAIL or
+		--self.state.map[x][y].d == STATE.BLOCKS.HEAD then
+		return false
+	end
+
+	--print("cant move, next tile [" .. tostring(x) .. "," .. tostring(y) .. "] has: " .. tostring(self.state.map[x][y].d) .. " (can move: " .. tostring(self.can_move) .. ")")
+	return true
+end
+
+local function change_ready_state(self, ready)
+	if (self.ready ~= ready) then
+		-- send not ready
+		msg.post("game", "set_ready", {player_id = self.player_id, ready = ready})
+	end
+
+	self.ready = ready
+end
+
+local function check_meta(self, x, y)
+	local meta_tile = self.state.map[x][y].meta
+	--self.ready = false
+	local ready = false
+	if meta_tile == STATE.BLOCKS.READY then
+		ready = true
+	end
+	change_ready_state(self, ready)
+end
+
+local function move(self, action)
+	local new_x = self.head.x
+	local new_y = self.head.y
+	local r = vmath.quat_rotation_z(0)
+	local arrow_offset = vmath.vector3(0, 0, 0.1)
+	if action == ACTIONS.UP then
+		new_y = new_y + 1
+		r = vmath.quat_rotation_z(math.pi/2)
+		arrow_offset.y = -16
+	elseif action == ACTIONS.DOWN then
+		new_y = new_y - 1
+		r = vmath.quat_rotation_z(-math.pi/2)
+		arrow_offset.y = 16
+	elseif action == ACTIONS.LEFT then
+		new_x = new_x - 1
+		r = vmath.quat_rotation_z(math.pi)
+		arrow_offset.x = 16
+	elseif action == ACTIONS.RIGHT then
+		new_x = new_x + 1
+		r = vmath.quat_rotation_z(0)
+		arrow_offset.x = -16
+	end
+	
+	-- check if move is possible
+	if not can_move(self, new_x, new_y) then
+		return
+	end
+	self.can_move = false
+
+	-- update map with move data
+	self.state.map[self.head.x][self.head.y].d = nil
+
+	-- pull tail parts
+	pull_tail(self, self.head.x, self.head.y, self.head.tail)
+
+	-- check teleport
+	local teleport = self.state.map[new_x][new_y].teleport
+	if teleport then
+		new_x = teleport[1]
+		new_y = teleport[2]
+		msg.post("game", "tele_trail_pos", {position = vmath.vector3(new_x*self.block_size, new_y*self.block_size, 0), color = self.player_color})
+	end
+
+	local prev_d = self.state.map[new_x][new_y].d
+	local prev_d_tail = self.state.map[new_x][new_y].tail
+
+	
+	-- perform move
+	self.state.map[new_x][new_y].d = STATE.BLOCKS.HEAD
+	self.head.x = new_x
+	self.head.y = new_y
+	go.animate(".", "position", go.PLAYBACK_ONCE_FORWARD, vmath.vector3(self.head.x*self.block_size, self.head.y*self.block_size, 0), go.EASING_LINEAR, self.move_speed, 0, function()
+		self.can_move = true
+	end)
+	
+	go.set_rotation(r, self.arrow_go)
+
+	-- check meta cells
+	check_meta(self, self.head.x, self.head.y)
+
+
+	-- EAT!
+	if prev_d == STATE.BLOCKS.EATABLE or
+	prev_d == STATE.BLOCKS.TAIL then
+
+		if prev_d == STATE.BLOCKS.TAIL and self.head ~= prev_d_tail.head then
+			--local eaten_tail = prev_d_tail
+			-- notify tail owner of new tail end
+			--notify_tail_owner_of_death(self, eaten_tail)
+			local tail_head = prev_d_tail.head
+			make_tail_dead(self, prev_d_tail, STATE.BLOCKS.WALL)
+
+			-- remark as head after eaten
+			self.state.map[new_x][new_y].d = STATE.BLOCKS.HEAD
+		end
+		spawn_tail(self)
+		tilemap.set_tile("gamemap#map", "layer1", new_x, new_y, 0)
+		
+		if prev_d == STATE.BLOCKS.EATABLE then
+			STATE.connect(self, "gamemap#map", STATE.BLOCKS.EATABLE, new_x, new_y)
+			STATE.connect(self, "gamemap#map", STATE.BLOCKS.EATABLE, new_x+1, new_y)
+			STATE.connect(self, "gamemap#map", STATE.BLOCKS.EATABLE, new_x, new_y-1)
+			STATE.connect(self, "gamemap#map", STATE.BLOCKS.EATABLE, new_x-1, new_y)
+			STATE.connect(self, "gamemap#map", STATE.BLOCKS.EATABLE, new_x, new_y+1)
+		end
+		
+	end
+	
+	-- TODO update rest of map
+end
+
+function init(self)
+	msg.post(".", "acquire_input_focus")
+	self.block_size = 16
+	self.state = STATE
+	self.head = {x=self.start_pos.x, y=self.start_pos.y, tail = nil, end_tail = nil}
+	--self.state.map = new_map()
+
+	self.arrow_go = msg.url("arrow")
+
+	-- debug wall
+	--[[
+	self.state.map[4][5].d = STATE.BLOCKS.WALL
+	self.state.map[5][5].d = STATE.BLOCKS.WALL
+	self.state.map[6][5].d = STATE.BLOCKS.WALL
+	self.state.map[6][4].d = STATE.BLOCKS.WALL
+	--]]
+
+	self.move_speed = 8/60
+	self.can_move = true
+
+	-- spawn and attach arrow go
+	self.arrow_go = factory.create("#arrow_factory")
+	msg.post(self.arrow_go, "set_parent", { parent_id = go.get_id()})
+
+	-- set color
+	sprite.set_constant("#sprite", "tint", go.get("#", "player_color"))
+	--print(go.get("#", "player_color"))
+
+	-- create fake tail + disable
+	self.fake_tail = factory.create("#tail_factory", vmath.vector3(0))
+	msg.post(self.fake_tail, "disable")
+
+	spawn_tail(self)
+	spawn_tail(self)
+	spawn_tail(self)
+	spawn_tail(self)
+end
+
+function update(self, dt)
+	if self.dead then
+		return
+	end
+	
+	if self.move_action then
+		move(self, self.move_action)
+		self.move_action = nil
+	end
+
+	-- TODO calc bounds
+	local cam_pos = go.get("game#game", "camera_look_pos")
+	--cam_pos.x = cam_pos.x / 16
+	--cam_pos.y = cam_pos.y / 16
+	local bx1 = (cam_pos.x - 256) / 16
+	local bx2 = (cam_pos.x + 256) / 16
+	local by1 = (cam_pos.y - 256) / 16
+	local by2 = (cam_pos.y + 256) / 16
+	self.dead = check_death(self, self.head.tail, bx1, bx2, by1, by2)
+
+	if self.dead then
+		msg.post("game#game", "player_dead", {id = self.player_id, pos = go.get_position()})
+
+		-- turn tail into eatables!
+		make_tail_dead(self, self.head.tail, STATE.BLOCKS.WALL)
+		-- delete fake tail
+		go.delete(self.fake_tail)
+		msg.post(".", "disable")
+		msg.post(self.arrow_go, "disable")
+	end
+end
+
+function on_message(self, message_id, message, sender)
+	if message_id == hash("input") then
+		local action = message.action
+		local action_id = message.action_id
+		
+		--if action.pressed or action.released then
+			if action_id == ACTIONS.UP or
+				action_id == ACTIONS.DOWN or
+				action_id == ACTIONS.LEFT or
+				action_id == ACTIONS.RIGHT then
+
+				self.move_action = action_id
+				--move(self, action_id)
+			end
+		--end
+	end
+end
+
+--[[
+function on_input(self, action_id, action)
+	--if action.pressed or action.released then
+		if action_id == hash("key-up") then
+			move(self, self.ACTION_UP)
+		elseif action_id == hash("key-down") then
+			move(self, self.ACTION_DOWN)
+		elseif action_id == hash("key-left") then
+			move(self, self.ACTION_LEFT)
+		elseif action_id == hash("key-right") then
+			move(self, self.ACTION_RIGHT)
+		end
+
+	if action.pressed then
+		if action_id == hash("debug-tail") then
+			spawn_tail(self)
+		elseif action_id == hash("debug-map") then
+			pprint(self.state.map)
+		end
+	end
+end
+]]

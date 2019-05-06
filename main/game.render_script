@@ -1,0 +1,237 @@
+--
+-- projection that centers content with maintained aspect ratio and optional zoom
+--
+local function fixed_projection(near, far, zoom)
+    local projected_width = render.get_window_width() / (zoom or 1)
+    local projected_height = render.get_window_height() / (zoom or 1)
+    local xoffset = -(projected_width - render.get_width()) / 2
+    local yoffset = -(projected_height - render.get_height()) / 2
+    return vmath.matrix4_orthographic(xoffset, xoffset + projected_width, yoffset, yoffset + projected_height, near, far)
+end
+local function custom_fixed_projection(near, far, zoom)
+    local projected_width = render.get_window_width() / (zoom or 1)
+    local projected_height = render.get_window_height() / (zoom or 1)
+    local xoffset = -(projected_width - render.get_width()) / 2
+    local yoffset = -(projected_height - render.get_height()) / 2
+    return vmath.matrix4_orthographic(xoffset-projected_width/2, xoffset + projected_width/2, yoffset - projected_height/2, yoffset + projected_height/2, near, far)
+end
+
+local function custom_fixed_projection(near, far, zoom)
+    local orig_w = render.get_width() / zoom
+    local orig_h = render.get_height() / zoom
+    local new_w = render.get_window_width()
+    local new_h = render.get_window_height()
+    local aspect = orig_w / orig_h
+    local w_diff = new_w / orig_w
+    local h_diff = new_h / orig_h
+
+    local w = orig_w
+    local h = orig_h
+    local hw = w/2
+    local hh = h/2
+    
+    return vmath.matrix4_orthographic(-hw, hw, -hh, hh, near, far)
+end
+--
+-- projection that centers and fits content with maintained aspect ratio
+--
+local function fixed_fit_projection(near, far)
+    local width = render.get_width()
+    local height = render.get_height()
+    local window_width = render.get_window_width()
+    local window_height = render.get_window_height()
+    local zoom = math.min(window_width / width, window_height / height)
+    return fixed_projection(near, far, zoom)
+end
+--
+-- projection that stretches content
+--
+local function stretch_projection(near, far)
+    return vmath.matrix4_orthographic(0, render.get_width(), 0, render.get_height(), near, far)
+end
+
+local function get_projection(self)
+    return self.projection_fn(self.near, self.far, self.zoom)
+end
+
+function init(self)
+    self.tile_pred = render.predicate({"tile"})
+    self.tile_map_pred = render.predicate({"tile_map"})
+    self.gui_pred = render.predicate({"gui"})
+    self.text_pred = render.predicate({"text"})
+    self.particle_pred = render.predicate({"particle"})
+    self.snake_pred = render.predicate({"snake"})
+    self.fs_pred = render.predicate({"fs"})
+
+    self.clear_color = vmath.vector4(21/255, 10/255, 31/255, 1)
+    --self.clear_color.x = sys.get_config("render.clear_color_red", 0)
+    --self.clear_color.y = sys.get_config("render.clear_color_green", 0)
+    --self.clear_color.z = sys.get_config("render.clear_color_blue", 0)
+    --self.clear_color.w = sys.get_config("render.clear_color_alpha", 0)
+
+    self.view = vmath.matrix4()
+
+    -- default is stretch projection. copy from builtins and change for different projection
+    -- or send a message to the render script to change projection:
+    -- msg.post("@render:", "use_stretch_projection", { near = -1, far = 1 })
+    -- msg.post("@render:", "use_fixed_projection", { near = -1, far = 1, zoom = 2 })
+    -- msg.post("@render:", "use_fixed_fit_projection", { near = -1, far = 1 })
+    self.near = -1
+    self.far = 1
+    self.projection_fn = stretch_projection
+
+    self.zoom = 2
+
+    self.render_w = render.get_width()/2
+    self.render_h = render.get_height()/2
+
+    -- setup rt for snakes
+    local rt_props = {
+        [render.BUFFER_COLOR_BIT] = {
+            width = self.render_w,
+            height = self.render_h,
+            format = render.FORMAT_RGBA,
+            min_filter = render.FILTER_NEAREST,
+            mag_filter = render.FILTER_NEAREST,
+            u_wrap = render.WRAP_CLAMP_TO_EDGE,
+            v_wrap = render.WRAP_CLAMP_TO_EDGE
+        },
+
+        [render.BUFFER_DEPTH_BIT] = {
+            width = self.render_w,
+            height = self.render_h,
+            format = render.FORMAT_DEPTH,
+            min_filter = render.FILTER_NEAREST,
+            mag_filter = render.FILTER_NEAREST,
+            u_wrap = render.WRAP_CLAMP_TO_EDGE,
+            v_wrap = render.WRAP_CLAMP_TO_EDGE
+        }
+    }
+    self.rt_snakes = render.render_target("snakes", rt_props)
+    self.rt_comp = render.render_target("comp", rt_props)
+end
+
+local function draw_snakes(self, rt)
+    if rt then
+        render.set_render_target(rt)
+        render.set_viewport(0, 0, self.render_w, self.render_h)
+        render.clear({[render.BUFFER_COLOR_BIT] = vmath.vector4(0), [render.BUFFER_DEPTH_BIT] = 1, [render.BUFFER_STENCIL_BIT] = 0})
+    end
+
+    
+    render.set_depth_mask(false)
+    render.disable_state(render.STATE_DEPTH_TEST)
+    render.disable_state(render.STATE_STENCIL_TEST)
+    render.enable_state(render.STATE_BLEND)
+    render.set_blend_func(render.BLEND_SRC_ALPHA, render.BLEND_ONE_MINUS_SRC_ALPHA)
+    render.disable_state(render.STATE_CULL_FACE)
+
+    local hw = self.render_w
+    local hh = self.render_h
+    local p_mtx = vmath.matrix4_orthographic(-hw, hw, -hh, hh, -1, 1)
+    render.set_projection(custom_fixed_projection(self.near, self.far, self.zoom))
+    render.set_view(self.view)
+
+
+    render.draw(self.snake_pred)
+    
+    if rt then
+        render.set_render_target(render.RENDER_TARGET_DEFAULT)
+    end
+end
+
+local function draw_fs_pass(self, rt, tex_unit, mat)
+    if not rt then
+        return
+    end
+    render.enable_texture(tex_unit, rt, render.BUFFER_COLOR_BIT)
+    --render.set_viewport(0, 0, render.get_window_width(), render.get_window_height())
+    --render.clear({[render.BUFFER_COLOR_BIT] = vmath.vector4(0), [render.BUFFER_DEPTH_BIT] = 1, [render.BUFFER_STENCIL_BIT] = 0})
+    render.set_view(vmath.matrix4())
+    local s = 16 -- size of stripes texture
+    local hs = s / 2
+    render.set_projection( vmath.matrix4_orthographic(-hs, hs, -hs, hs, -1, 1))
+    if mat then
+        render.enable_material(mat)
+    end
+    render.draw(self.fs_pred)
+    if mat then
+        render.disable_material()
+    end
+    render.disable_texture(tex_unit)
+end
+
+local function draw_gui(self)
+    -- render GUI
+    --
+    --render.set_viewport(0, 0, self.render_w, self.render_h)
+    --render.clear({[render.BUFFER_COLOR_BIT] = vmath.vector4(1,0,0,1), [render.BUFFER_DEPTH_BIT] = 0, [render.BUFFER_STENCIL_BIT] = 0})
+    render.set_view(vmath.matrix4())
+    render.set_projection(vmath.matrix4_orthographic(0, render.get_window_width(), 0, render.get_window_height(), -1, 1))
+
+    --render.enable_state(render.STATE_STENCIL_TEST)
+    render.draw(self.gui_pred)
+    render.draw(self.text_pred)
+    --render.disable_state(render.STATE_STENCIL_TEST)
+end
+
+function update(self)
+    render.set_depth_mask(true)
+    render.set_stencil_mask(0xff)
+    --render.clear({[render.BUFFER_COLOR_BIT] = self.clear_color, [render.BUFFER_DEPTH_BIT] = 1, [render.BUFFER_STENCIL_BIT] = 0})
+
+    --render.set_viewport(0, 0, render.get_window_width(), render.get_window_height())
+
+    -- render game
+    draw_snakes(self, self.rt_snakes)
+
+    -- render to comp rt
+    render.set_render_target(self.rt_comp)
+    render.set_viewport(0, 0, self.render_w, self.render_h)
+    render.clear({[render.BUFFER_COLOR_BIT] = vmath.vector4(0), [render.BUFFER_DEPTH_BIT] = 1, [render.BUFFER_STENCIL_BIT] = 0})
+
+    -- render map as bg
+    local hw = self.render_w / 2
+    local hh = self.render_h / 2
+    local proj_mtx = vmath.matrix4_orthographic(-hw, hw, -hh, hh, -1, 1)
+    render.set_view(self.view)
+    render.set_projection(proj_mtx)
+    render.draw(self.tile_map_pred)
+    
+    -- render snakes buffer
+    draw_fs_pass(self, self.rt_snakes, 1)
+
+    -- render tile last, will be rendered above anything else in game (except gui)
+    render.set_view(self.view)
+    render.set_projection(proj_mtx)
+    render.draw(self.tile_pred)
+    render.draw(self.particle_pred)
+    render.draw_debug3d()
+    
+    render.disable_state(render.STATE_CULL_FACE)
+    render.disable_state(render.STATE_STENCIL_TEST)
+    render.disable_state(render.STATE_DEPTH_TEST)
+    
+    draw_gui(self)
+    
+    render.set_render_target(render.RENDER_TARGET_DEFAULT)
+
+
+    -- render to backbuffer
+    render.clear({[render.BUFFER_COLOR_BIT] = self.clear_color, [render.BUFFER_DEPTH_BIT] = 1, [render.BUFFER_STENCIL_BIT] = 0})
+    render.set_viewport(0, 0, render.get_window_width(), render.get_window_height())
+    draw_fs_pass(self, self.rt_comp, 0, "copy")
+
+    
+    --draw_gui(self)
+    --]]
+end
+
+function on_message(self, message_id, message)
+    if message_id == hash("camera_pos") then
+        self.camera_pos = message.position
+        local eye = vmath.vector3(self.camera_pos)
+        self.camera_pos.z = -1
+        self.view = vmath.matrix4_look_at(eye, self.camera_pos, vmath.vector3(0, 1, 0))
+    end
+end

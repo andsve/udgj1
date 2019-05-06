@@ -1,0 +1,157 @@
+local ACTIONS = require("main.shared.actions")
+
+local function reset_selection_anim(self, id)
+	local id_name = id --self.screens[self.current_screen][self.selection_index].id
+	local label_node = gui.get_node("button_" .. id_name .. "/label")
+	local p = gui.get_position(label_node)
+	p.z = 0.0
+	gui.set_position(label_node, p)
+end
+
+local function update_selection(self, id)
+	local id_name = self.screens[self.current_screen][self.selection_index].id
+	self.selected_id = id_name
+
+	-- get node from id
+	local node = gui.get_node("button_" .. self.selected_id .. "/bg")
+	local label_node = gui.get_node("button_" .. self.selected_id .. "/label")
+
+	-- reparent
+	gui.set_parent(self.selection_node, node, false)
+	--gui.set_position(self.selection_node, vmath.vector3(0))
+	--[[
+	local p = gui.get_position(self.selection_node)
+	p.x = p.x/2
+	p.y = p.y/2
+	gui.set_position(self.selection_node, p)
+	gui.animate(self.selection_node, "position", vmath.vector3(0), gui.EASING_LINEAR, 0.1)
+	--]]
+	for _,v in pairs(self.screens[self.current_screen]) do
+		reset_selection_anim(self, v.id)
+	end
+	
+	local p = gui.get_position(label_node)
+	p.z = self.a
+	gui.set_position(label_node, p)
+end
+
+local function change_selection(self, direction)
+	local node_count = #self.screens[self.current_screen]
+	--self.selection_index = (self.selection_index + direction) % node_count + 1
+	self.selection_index = self.selection_index + direction
+	if self.selection_index > node_count then
+		self.selection_index = 1
+	elseif self.selection_index == 0 then
+		self.selection_index = node_count
+	end
+	update_selection(self)
+end
+
+local function change_screen(self, new_screen)
+	-- TODO do something for old screen?
+	-- self.current_screen
+
+	self.current_screen = new_screen
+	local new_screen_p = gui.get_position(gui.get_node("screen_" .. self.current_screen))
+	gui.animate(gui.get_node("root"), "position", -new_screen_p*2.0, gui.EASING_INCUBIC, 0.4)
+	self.selection_index = 1
+end
+
+function init(self)
+	self.screens = {
+		main = {
+			{ id = "start_game",
+			action = function(self)
+				msg.post("controller:/main", "start_lobby")
+				change_screen(self, "lobby")
+			end}
+			--[[,
+			{ id = "settings",
+			action = function(self)
+				change_screen(self, "settings")
+			end },
+			{ id = "credits",
+			action = function(self)
+				change_screen(self, "credits")
+			end }
+			--]]
+		},
+		lobby = {
+			{ id = "sg_back",
+			action = function(self)
+				msg.post("controller:/main", "cancel_lobby")
+				change_screen(self, "main")
+			end},
+			{ id = "sg_start",
+			action = function(self)
+				msg.post("controller:/main", "start_game")
+				--change_screen(self, "game")
+			end}
+		},
+		game = {
+			{ id = "game_dummy",
+			action = function(self)
+				--msg.post("controller:/main", "cancel_lobby")
+				--change_screen(self, "main")
+			end}
+		},
+		win = {
+			{ id = "win_back",
+			action = function(self)
+				change_screen(self, "main")
+			end}
+		}
+	}
+
+	self.current_screen = "main"
+	self.selection_index = 1
+	self.selection_node = gui.get_node("selection")
+	
+	--self.selected_id = "button_start_game"
+	self.a = 0
+	update_selection(self)
+
+	
+end
+
+function final(self)
+	-- Add finalization code here
+	-- Remove this function if not needed
+end
+
+function update(self, dt)
+	self.a = self.a + dt*20
+	update_selection(self)
+end
+
+function on_message(self, message_id, message, sender)
+	if message_id == hash("input") then
+		--print("got: " .. tostring(message.action_id))
+		local action_id = message.action_id
+		local action = message.action
+
+		if action_id == ACTIONS.UP and action.pressed then
+			change_selection(self, -1)
+		elseif action_id == ACTIONS.DOWN and action.pressed then
+			change_selection(self, 1)
+		elseif action_id == ACTIONS.ACTION and action.pressed then
+			local button_action = self.screens[self.current_screen][self.selection_index].action
+			button_action(self)
+		end
+	elseif message_id == hash("change_screen") then
+		change_screen(self, message.screen)
+	elseif message_id == hash("set_winner") then
+		gui.set_text(gui.get_node("win_label"), message.winner_text)
+		gui.set_color(gui.get_node("win_label"), message.winner_color)
+	end
+end
+
+function on_input(self, action_id, action)
+	-- Add input-handling code here
+	-- Remove this function if not needed
+end
+
+function on_reload(self)
+	-- Add input-handling code here
+	-- Remove this function if not needed
+end

@@ -1,0 +1,258 @@
+go.property("camera_look_pos", vmath.vector3(0,0,0))
+
+local ACTIONS = require("main.shared.actions")
+local STATE = require("main.shared.state")
+
+local function spawn_eatables(self, x, y)
+	local t = {}
+	STATE:gen_block_thingy(t, x, y, 3)
+	for i,v in ipairs(t) do
+		self.state.map[v[1]][v[2]].d = STATE.BLOCKS.EATABLE
+		tilemap.set_tile("gamemap#map", "layer1", v[1], v[2], 193)
+	end
+	--[[
+	for _,v in ipairs(t) do
+		STATE.connect(self, "gamemap#map", STATE.BLOCKS.EATABLE, v[1], v[2])
+	end
+	--]]
+end
+
+local function new_camera_pan(self)
+	self.pan_timer = math.random(10, 20)
+	self.pan_direction = math.random()*math.pi*2
+	self.pan_direction = vmath.vector3(math.cos(self.pan_direction), math.sin(self.pan_direction), 0)
+	self.pan_direction = vmath.normalize(self.pan_direction)
+end
+
+function init(self)
+	self.players = {}
+
+	self.state = STATE
+	self.state:new_map()
+
+	self.tele1_go = msg.url("tele1")
+	self.tele2_go = msg.url("tele2")
+	self.tele1_pos = {-4, 5}
+	self.tele2_pos = {4, 0}
+	
+	self.state.map[self.tele2_pos[1]][self.tele2_pos[2]].teleport = self.tele1_pos
+	self.state.map[self.tele1_pos[1]][self.tele1_pos[2]].teleport =self.tele2_pos
+
+	--self.camera_look_pos = vmath.vector3(0, 0, 0)
+	--self.camera_look_pos = vmath.vector3(-100*16+256, -100*16+256, 0)
+
+	self.shake = 0
+	self.a = vmath.quat()
+	--self.tele_trail_go = msg.url("tele_trail")
+	--self.tele_trail_model = msg.url("tele_trail#trail_maker")
+
+	self.ready_labels = {}
+	self.ready_labels[hash("p1")] = msg.url("lobby#ready_p1")
+	self.ready_labels[hash("p2")] = msg.url("lobby#ready_p2")
+	self.ready_labels[hash("p3")] = msg.url("lobby#ready_p3")
+	self.ready_labels[hash("p4")] = msg.url("lobby#ready_p4")
+	self.ready_labels[hash("p5")] = msg.url("lobby#ready_p5")
+	self.ready_labels[hash("p6")] = msg.url("lobby#ready_p6")
+	
+	self.ready_labels_text = {}
+	self.ready_labels_text[hash("p1")] = "Player 1"
+	self.ready_labels_text[hash("p2")] = "Player 2"
+	self.ready_labels_text[hash("p3")] = "Player 3"
+	self.ready_labels_text[hash("p4")] = "Player 4"
+	self.ready_labels_text[hash("p5")] = "Player 5"
+	self.ready_labels_text[hash("p6")] = "Player 6"
+
+	--particlefx.play("#danger_effect")
+
+	self.game_speed = 10
+	
+	local step_size = 5
+	for x=-self.state.map_size,self.state.map_size,step_size do
+		for y=-self.state.map_size,self.state.map_size,step_size do
+			spawn_eatables(self, x, y)
+			--print(x,y)
+			step_size = math.random(3, 5)
+		end
+	end
+	for x=-self.state.map_size,self.state.map_size,1 do
+		for y=-self.state.map_size,self.state.map_size,1 do
+			STATE.connect(self, "gamemap#map", STATE.BLOCKS.EATABLE, x, y)
+		end
+	end
+	
+
+	self.pan_direction = vmath.vector3(0)
+	new_camera_pan(self)
+
+	self.camera_max = self.state.map_size*16-256
+end
+
+function update(self, dt)
+	self.camera_look_pos.x = self.camera_look_pos.x + self.pan_direction.x * self.game_speed * dt
+	self.camera_look_pos.y = self.camera_look_pos.y + self.pan_direction.y * self.game_speed * dt
+	self.pan_timer = self.pan_timer - dt
+	self.game_speed = self.game_speed + dt*0.1
+
+	if self.camera_look_pos.x <= -self.camera_max or
+		self.camera_look_pos.x >= self.camera_max or
+		self.camera_look_pos.y <= -self.camera_max or
+		self.camera_look_pos.y >= self.camera_max then
+			self.pan_timer = 0
+	end
+
+	if self.pan_timer <= 0 then
+		new_camera_pan(self)
+	end
+
+	-- update border go
+	go.set_position(self.camera_look_pos, "danger_border")
+	--go.set_position(self.camera_look_pos)
+	self.a = self.a * vmath.quat_rotation_z(0.4)
+	--go.set_rotation(self.a)
+
+	local cam_pos_adjusted = vmath.vector3(self.camera_look_pos)
+	if self.shake > 0 then
+		local d = self.shake
+		d = math.min(1, self.shake)
+		cam_pos_adjusted.x = cam_pos_adjusted.x + d*(math.random()*10-5)
+		cam_pos_adjusted.y = cam_pos_adjusted.y + d*(math.random()*10-5)
+		self.shake = self.shake - dt
+	end
+	msg.post("@render:", "camera_pos", { position = cam_pos_adjusted })
+
+	-- respawn teleports if needed
+	local cam_pos = self.camera_look_pos
+	--cam_pos.x = cam_pos.x / 16
+	--cam_pos.y = cam_pos.y / 16
+	local bx1 = (cam_pos.x - 256) / 16
+	local bx2 = (cam_pos.x + 256) / 16
+	local by1 = (cam_pos.y - 256) / 16
+	local by2 = (cam_pos.y + 256) / 16
+
+	if self.tele1_pos[1] <= bx1 or
+		self.tele1_pos[1] >= bx2 or
+		self.tele1_pos[2] <= by1 or
+		self.tele1_pos[2] >= by2 then
+
+			local new_p = {math.random(bx1+8, bx2-8), math.random(by1+8, by2-8)}
+			-- reset previous position
+			self.state.map[self.tele1_pos[1]][self.tele1_pos[2]].teleport = nil
+			self.tele1_pos = new_p
+			local wp = vmath.vector3(new_p[1]*16, new_p[2]*16, 0)
+			go.set_position(wp, self.tele1_go)
+			local in_spawner_go = factory.create("#spawnerfactory", wp)
+
+			wp.y = wp.y + 16
+			local tele_text_go = factory.create("#textfactory", wp)
+			local label_url = msg.url(tele_text_go)
+			label_url.fragment = "label"
+			label.set_text(label_url, "Teleporter")
+
+	end
+
+	if self.tele2_pos[1] <= bx1 or
+	self.tele2_pos[1] >= bx2 or
+	self.tele2_pos[2] <= by1 or
+	self.tele2_pos[2] >= by2 then
+
+		local new_p = {math.random(bx1+8, bx2-8), math.random(by1+8, by2-8)}
+		-- reset previous position
+		self.state.map[self.tele2_pos[1]][self.tele2_pos[2]].teleport = nil
+		self.tele2_pos = new_p
+		local wp = vmath.vector3(new_p[1]*16, new_p[2]*16, 0)
+		go.set_position(wp, self.tele2_go)
+		local in_spawner_go = factory.create("#spawnerfactory", wp)
+
+		wp.y = wp.y + 16
+		local tele_text_go = factory.create("#textfactory", wp)
+		local label_url = msg.url(tele_text_go)
+		label_url.fragment = "label"
+		label.set_text(label_url, "Teleporter")
+
+	end
+
+	self.state.map[self.tele1_pos[1]][self.tele1_pos[2]].teleport = self.tele2_pos
+	self.state.map[self.tele2_pos[1]][self.tele2_pos[2]].teleport = self.tele1_pos
+end
+
+function on_message(self, message_id, message, sender)
+	if message_id == hash("new_player") then
+		local player = { id = message.id }
+
+		local player_pos = vmath.vector3(message.start_pos[1]*16, message.start_pos[2]*16, 0)
+
+		-- create player go
+		local snake_go = factory.create("#snake_factory", player_pos, vmath.quat(), {
+				player_id = message.id,
+				player_color = message.player_color,
+				start_pos = vmath.vector3(message.start_pos[1], message.start_pos[2], 0)
+				--player_color = vmath.vector4(142/255, 22/255, 102/255, 1.0)
+			})
+		player.go = snake_go
+
+		self.players[message.id] = player
+	elseif message_id == hash("lobby_map") then
+		local ready_tile = 929
+		local bx1,by1,bx2,by2 = tilemap.get_bounds("lobby#map")
+		bx2=bx2+bx1-1
+		by2=by2+by1-1
+		for x = bx1,bx2 do
+			for y = by1,by2 do
+				--print(x, y)
+				local tile = tilemap.get_tile("lobby#map", "layer1", x, y)
+				if tile >= 129 and tile <= 144 then
+					self.state.map[x][y].d = STATE.BLOCKS.WALL
+				end
+
+				-- meta tile
+				local meta_tile = tilemap.get_tile("lobby#map", "meta", x, y)
+				if meta_tile == ready_tile then
+					self.state.map[x][y].meta = STATE.BLOCKS.READY
+				end
+			end
+		end
+	elseif message_id == hash("set_ready") then
+		self.players[message.player_id].ready = message.ready
+		msg.post("controller:/main", "set_ready", {player_id = message.player_id, ready = message.ready})
+
+		local label_text = self.ready_labels_text[message.player_id]
+		local color = vmath.vector4(1, 1, 1, 1)
+		if message.ready then
+			color = vmath.vector4(0, 1, 0, 1)
+			label_text = "Ready!"
+		end
+		--print(message.ready)
+		go.set(self.ready_labels[message.player_id], "color", color)
+		label.set_text(self.ready_labels[message.player_id], label_text)
+		
+	elseif message_id == hash("player_input") then
+		-- get player for input
+		local player = self.players[message.player_id]
+		msg.post(player.go, "input", {action_id = message.action_id, action = message.action})
+	elseif message_id == hash("tele_trail_pos") then
+		--go.set_position(message.position, self.tele_trail)
+		--go.set(self.tele_trail_model, "trail_tint_color", message.color)
+		--go.animate(self.tele_trail_go, "position", go.PLAYBACK_ONCE_FORWARD, message.position, go.EASING_LINEAR, 0.2)
+	elseif message_id == hash("player_dead") then
+		-- spawn death text
+		self.players[message.id].dead = true
+		
+		-- mark as dead	
+		factory.create("#textfactory", message.pos)
+
+		-- check winner
+		local alive_count = 0
+		local possible_winner = nil
+		for k,v in pairs(self.players) do
+			if not v.dead then
+				possible_winner = k
+				alive_count = alive_count + 1
+			end
+		end
+
+		if alive_count == 1 then
+			msg.post("controller:/main", "game_over", {winner = possible_winner})
+			msg.post("@render:", "camera_pos", { position = vmath.vector3(0,0,0) })
+		end
+	end
+end
